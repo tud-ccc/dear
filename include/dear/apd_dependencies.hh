@@ -31,7 +31,7 @@ using ara::com::internal::skeleton::EventDispatcher;
 namespace proxy {
 using ara::com::internal::proxy::Event;
 using ara::com::internal::proxy::Method;
-} // namespace proxy
+}  // namespace proxy
 
-} // namespace apd
-} // namespace dear
+}  // namespace apd
+}  // namespace dear

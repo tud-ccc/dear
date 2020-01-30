@@ -8,9 +8,8 @@
 
 #pragma once
 
-#include <type_traits>
-
 #include <reactor-cpp/time.hh>
+#include <type_traits>
 
 #include "dear/apd_dependencies.hh"
 
@@ -20,16 +19,18 @@ constexpr reactor::Duration network_delay{10000000};
 
 namespace internal {
 
-template <class... T> struct _message_size;
+template <class... T>
+struct _message_size;
 
-template <class Head, class... Tail> struct _message_size<Head, Tail...> {
-  static size_t size(const std::shared_ptr<::vsomeip::message> &message,
+template <class Head, class... Tail>
+struct _message_size<Head, Tail...> {
+  static size_t size(const std::shared_ptr<::vsomeip::message>& message,
                      size_t offset) {
     // XXX I have no clue why this is required... Somewhere const& gets added
     // to the type and we need to remove it ....
     using base_type = typename std::remove_cv<
         typename std::remove_reference<Head>::type>::type;
-    const ::vsomeip::payload &payload = *message->get_payload();
+    const ::vsomeip::payload& payload = *message->get_payload();
     apd::Deserializer<base_type> deserializer(payload.get_data() + offset,
                                               payload.get_length() - offset);
 
@@ -38,23 +39,24 @@ template <class Head, class... Tail> struct _message_size<Head, Tail...> {
   }
 };
 
-template <> struct _message_size<> {
-  static size_t size(const std::shared_ptr<::vsomeip::message> &message,
+template <>
+struct _message_size<> {
+  static size_t size(const std::shared_ptr<::vsomeip::message>& message,
                      size_t offset) {
     return offset;
   }
 };
 
-} // namespace internal
+}  // namespace internal
 
 template <class... T>
-uint64_t get_message_size(const std::shared_ptr<::vsomeip::message> &message) {
+uint64_t get_message_size(const std::shared_ptr<::vsomeip::message>& message) {
   return internal::_message_size<T...>::size(message, 0);
 }
 
 template <class... Args>
-apd::Result<reactor::TimePoint, bool>
-get_timestamp_from_message(const std::shared_ptr<::vsomeip::message> &message) {
+apd::Result<reactor::TimePoint, bool> get_timestamp_from_message(
+    const std::shared_ptr<::vsomeip::message>& message) {
   using Result = apd::Result<reactor::TimePoint, bool>;
 
   size_t payload_size = message->get_payload()->get_length();
@@ -75,4 +77,4 @@ get_timestamp_from_message(const std::shared_ptr<::vsomeip::message> &message) {
   return Result::FromError(false);
 }
 
-} // namespace dear
+}  // namespace dear
