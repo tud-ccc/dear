@@ -11,9 +11,9 @@
 #include <cassert>
 #include <utility>
 
-#include "dear/apd_dependencies.hh"
-
 #include <reactor-cpp/logical_time.hh>
+
+#include "dear/apd_dependencies.hh"
 
 namespace dear {
 
