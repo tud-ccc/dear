@@ -61,13 +61,9 @@ apd::Result<reactor::TimePoint, bool> get_timestamp_from_message(
   size_t message_size = get_message_size<Args...>(message);
 
   // check if there is a timestamp attached
-  if (payload_size == sizeof(uint64_t) + message_size) {
-    apd::Unmarshaller<Args..., uint64_t> unmarshaller(*message);
-    auto time_ns = unmarshaller.template unmarshal<sizeof...(Args)>();
-
-    // TODO We do not verify the timestamp here. We must make sure that the
-    // timestamp will be validated when scheduling the corresponding action.
-
+  if (payload_size == sizeof(reactor::Duration::rep) + message_size) {
+    apd::Unmarshaller<Args..., reactor::Duration::rep> unmarshaller(*message);
+    reactor::Duration::rep time_ns = unmarshaller.template unmarshal<sizeof...(Args)>();
     reactor::TimePoint timestamp{reactor::Duration{time_ns}};
     return Result::FromValue(timestamp);
   }

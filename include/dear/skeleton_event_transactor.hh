@@ -61,7 +61,7 @@ class SkeletonEventTransactor : public reactor::Reactor {
 };  // namespace dear
 
 template <class T>
-std::unique_ptr<SkeletonEventTransactor<T>> create_transactor(
+std::unique_ptr<SkeletonEventTransactor<T>> create_skeleton_event_transactor(
     const std::string& name,
     reactor::Environment* env,
     apd::skeleton::EventDispatcher<T>* event,
