@@ -15,8 +15,6 @@
 
 namespace dear {
 
-constexpr reactor::Duration network_delay{10000000};
-
 namespace internal {
 
 template <class... T>
@@ -71,7 +69,7 @@ apd::Result<reactor::TimePoint, bool> get_timestamp_from_message(
     // timestamp will be validated when scheduling the corresponding action.
 
     reactor::TimePoint timestamp{reactor::Duration{time_ns}};
-    return Result::FromValue(timestamp + network_delay);
+    return Result::FromValue(timestamp);
   }
 
   return Result::FromError(false);
