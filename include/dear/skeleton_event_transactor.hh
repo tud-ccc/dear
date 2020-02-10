@@ -52,7 +52,6 @@ class SkeletonEventTransactor : public reactor::Reactor {
   }
 
   void on_notify() {
-    logger.LogDebug() << "notify";
     auto x = notify.get();
     TimeContext::provide_timestamp(this->get_logical_time() + deadline);
     event->Send(*x);

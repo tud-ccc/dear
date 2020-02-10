@@ -6,4 +6,5 @@
  *   Christian Menard
  */
 
+#include "dear/proxy_event_transactor.hh"
 #include "dear/skeleton_event_transactor.hh"
