@@ -9,3 +9,4 @@
 #include "dear/proxy_event_transactor.hh"
 #include "dear/proxy_method_transactor.hh"
 #include "dear/skeleton_event_transactor.hh"
+#include "dear/skeleton_method_transactor.hh"

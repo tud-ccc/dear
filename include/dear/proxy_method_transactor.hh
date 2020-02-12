@@ -20,8 +20,19 @@ class BaseProxyMethodTransactor : public reactor::Reactor {
  public:
   using Method = apd::proxy::Method<R(Args...)>;
   using ResultFuture = apd::Future<R>;
-  using ResultFuturePtr = std::shared_ptr<ResultFuture>;
-  using RequestType = std::tuple<Args...>;
+  using ResultFutureValue = reactor::ImmutableValuePtr<ResultFuture>;
+  using RequestType = std::tuple<typename std::remove_cv<
+      typename std::remove_reference<Args>::type>::type...>;
+  using ResponseValue = reactor::ImmutableValuePtr<R>;
+
+  struct ResponseData {
+    ResultFutureValue future;
+    reactor::TimePoint timestamp;
+
+    ResponseData(ResultFutureValue&& future, reactor::TimePoint timestamp)
+        : future(std::forward<ResultFutureValue>(future))
+        , timestamp(timestamp) {}
+  };
 
  protected:
   Method* method;
@@ -34,13 +45,13 @@ class BaseProxyMethodTransactor : public reactor::Reactor {
   reactor::LogicalAction<ResultFuture> send_response{"send_response", this};
 
  private:
-  reactor::PhysicalAction<ResultFuture> receive_response{"receive_response",
+  reactor::PhysicalAction<ResponseData> receive_response{"receive_response",
                                                          this};
 
   reactor::Reaction r_request{"r_request", 1, this, [this]() { on_request(); }};
-  reactor::Reaction r_receive_response{"r_receive_response", 1, this,
+  reactor::Reaction r_receive_response{"r_receive_response", 2, this,
                                        [this]() { on_receive_response(); }};
-  reactor::Reaction r_send_response{"r_send_response", 1, this,
+  reactor::Reaction r_send_response{"r_send_response", 3, this,
                                     [this]() { on_send_response(); }};
 
  public:
@@ -82,20 +93,24 @@ class BaseProxyMethodTransactor : public reactor::Reactor {
 
     // make sure we keep the future alive until the callback is issued
     auto future_ptr =
-        reactor::make_mutable_value<decltype(future)>(std::move(future));
-    future_ptr->then([this, &future_ptr]() {
-      receive_response.schedule(std::move(future_ptr));
+        reactor::make_immutable_value<decltype(future)>(std::move(future));
+    future_ptr->then([this, future_ptr]() mutable {
+      auto timestamp = TimeContext::retrieve_timestamp();
+      assert(timestamp.HasValue());
+      auto response_data = reactor::make_immutable_value<ResponseData>(
+          std::move(future_ptr), timestamp.Value());
+      receive_response.schedule(std::move(response_data));
     });
   }
 
   void on_receive_response() {
-    auto timestamp = TimeContext::retrieve_timestamp();
-    assert(timestamp.HasValue());
-    auto t = timestamp.Value() + max_network_delay + max_synchronization_error;
+    auto response_data = receive_response.get();
+    auto t = response_data->timestamp + max_network_delay +
+             max_synchronization_error;
     auto lt = get_logical_time();
 
     if (t > lt) {
-      send_response.schedule(receive_response.get(), t - lt);
+      send_response.schedule(std::move(response_data->future), t - lt);
     } else {
       logger.LogError() << "Timing violation! Received a message with "
                            "timestamp in the past!";
