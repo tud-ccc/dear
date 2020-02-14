@@ -76,14 +76,7 @@ class BaseSkeletonMethodTransactor : public reactor::Reactor {
 
   void on_send_request() { request.set(send_request.get()); }
 
-  void on_response() {
-    logger.LogInfo() << "Send response";
-    dear::TimeContext::provide_timestamp(this->get_logical_time() +
-                                         response_deadline);
-    pending_requests.begin()->second.set_value(*response.get());
-    dear::TimeContext::invalidate_timestamp();
-    pending_requests.erase(pending_requests.begin());
-  }
+  virtual void on_response() = 0;
 
  public:
   // reactor ports
@@ -170,6 +163,14 @@ class SkeletonMethodTransactor<apd::Future<R> (Service::*)(Args...)>
              response_deadline,
              max_network_delay,
              max_synchronization_error) {}
+
+  void on_response() override {
+    dear::TimeContext::provide_timestamp(this->get_logical_time() +
+                                         this->response_deadline);
+    this->pending_requests.begin()->second.set_value(*this->response.get());
+    dear::TimeContext::invalidate_timestamp();
+    this->pending_requests.erase(this->pending_requests.begin());
+  }
 };
 
 template <class Service, class... Args>
@@ -200,6 +201,14 @@ class SkeletonMethodTransactor<apd::Future<void> (Service::*)(Args...)>
              response_deadline,
              max_network_delay,
              max_synchronization_error) {}
+
+  void on_response() override {
+    dear::TimeContext::provide_timestamp(this->get_logical_time() +
+                                         this->response_deadline);
+    this->pending_requests.begin()->second.set_value();
+    dear::TimeContext::invalidate_timestamp();
+    this->pending_requests.erase(this->pending_requests.begin());
+  }
 };
 
 }  // namespace dear
