@@ -36,15 +36,18 @@ class BaseSkeletonMethodTransactor : public reactor::Reactor {
   };
 
  protected:
+  // reactor state
   reactor::Duration response_deadline;
   reactor::Duration max_network_delay;
   reactor::Duration max_synchronization_error;
   apd::Logger& logger;
   std::map<reactor::TimePoint, apd::Promise<R>> pending_requests;
 
+  // actions
   reactor::PhysicalAction<RequestData> receive_request{"receive_request", this};
   reactor::LogicalAction<RequestType> send_request{"send_request", this};
 
+  // reactions
   reactor::Reaction r_receive_request{"r_receive_request", 1, this,
                                       [this]() { on_receive_request(); }};
   reactor::Reaction r_send_request{"r_send_request", 2, this,
@@ -52,6 +55,7 @@ class BaseSkeletonMethodTransactor : public reactor::Reactor {
   reactor::Reaction r_response{"r_response", 3, this,
                                [this]() { on_response(); }};
 
+  // reaction bodies
   void on_receive_request() {
     auto request = receive_request.get();
 
@@ -97,9 +101,7 @@ class BaseSkeletonMethodTransactor : public reactor::Reactor {
       , max_synchronization_error(max_synchronization_error)
       , logger(apd::CreateLogger(name.c_str(),
                                  name.c_str(),
-                                 ara::log::LogLevel::kDebug)) {
-    assert(env != nullptr);
-  }
+                                 ara::log::LogLevel::kDebug)) {}
 
   BaseSkeletonMethodTransactor(const std::string& name,
                                reactor::Reactor* container,
@@ -112,9 +114,7 @@ class BaseSkeletonMethodTransactor : public reactor::Reactor {
       , max_synchronization_error(max_synchronization_error)
       , logger(apd::CreateLogger(name.c_str(),
                                  name.c_str(),
-                                 ara::log::LogLevel::kDebug)) {
-    assert(container != nullptr);
-  }
+                                 ara::log::LogLevel::kDebug)) {}
 
   void assemble() override {
     r_receive_request.declare_trigger(&receive_request);
@@ -124,6 +124,7 @@ class BaseSkeletonMethodTransactor : public reactor::Reactor {
     r_response.declare_trigger(&response);
   }
 
+  // This is called asynchronously to indicate a new request
   apd::Future<R> process_request(Args&&... args) {
     apd::Promise<R> promise;
     auto future = promise.get_future();
@@ -200,33 +201,5 @@ class SkeletonMethodTransactor<apd::Future<void> (Service::*)(Args...)>
              max_network_delay,
              max_synchronization_error) {}
 };
-
-template <class Service, class R, class... Args>
-std::unique_ptr<SkeletonMethodTransactor<apd::Future<R> (Service::*)(Args...)>>
-create_skeleton_method_transactor(const std::string& name,
-                                  reactor::Environment* env,
-                                  apd::Future<R> (Service::*)(Args...),
-                                  reactor::Duration request_deadline,
-                                  reactor::Duration max_network_delay,
-                                  reactor::Duration max_synchronization_error) {
-  return std::make_unique<
-      SkeletonMethodTransactor<apd::Future<R> (Service::*)(Args...)>>(
-      name, env, request_deadline, max_network_delay,
-      max_synchronization_error);
-}
-
-template <class Service, class R, class... Args>
-std::unique_ptr<SkeletonMethodTransactor<apd::Future<R> (Service::*)(Args...)>>
-create_skeleton_method_transactor(const std::string& name,
-                                  reactor::Reactor* container,
-                                  apd::Future<R> (Service::*)(Args...),
-                                  reactor::Duration request_deadline,
-                                  reactor::Duration max_network_delay,
-                                  reactor::Duration max_synchronization_error) {
-  return std::make_unique<
-      SkeletonMethodTransactor<apd::Future<R> (Service::*)(Args...)>>(
-      name, container, request_deadline, max_network_delay,
-      max_synchronization_error);
-}
 
 }  // namespace dear
