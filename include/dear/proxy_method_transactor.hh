@@ -15,15 +15,39 @@
 
 namespace dear {
 
+template <class... Args>
+struct get_request_type;
+
+template <>
+struct get_request_type<> {
+  using type = void;
+};
+
+template <class Head>
+struct get_request_type<Head> {
+  using type =
+      typename std::remove_cv<typename std::remove_reference<Head>::type>::type;
+};
+
+template <class Head, class... Tail>
+struct get_request_type<Head, Tail...> {
+  using type = std::tuple<
+      typename std::remove_cv<typename std::remove_reference<Head>::type>::type,
+      typename std::remove_cv<
+          typename std::remove_reference<Tail>::type>::type...>;
+};
+
+template <class Method>
+class ProxyMethodTransactor;
+
 template <class R, class... Args>
-class BaseProxyMethodTransactor : public reactor::Reactor {
+class ProxyMethodTransactor<apd::proxy::Method<R(Args...)>>
+    : public reactor::Reactor {
  public:
   using Method = apd::proxy::Method<R(Args...)>;
   using ResultFuture = apd::Future<R>;
   using ResultFutureValue = reactor::ImmutableValuePtr<ResultFuture>;
-  using RequestType = std::tuple<typename std::remove_cv<
-      typename std::remove_reference<Args>::type>::type...>;
-  using ResponseValue = reactor::ImmutableValuePtr<R>;
+  using RequestType = typename get_request_type<Args...>::type;
 
   struct ResponseData {
     ResultFutureValue future;
@@ -71,7 +95,14 @@ class BaseProxyMethodTransactor : public reactor::Reactor {
 
     dear::TimeContext::provide_timestamp(this->get_logical_time() +
                                          request_deadline);
-    auto future = std::apply(*(this->method), *request.get());
+    apd::Future<R> future;
+    if constexpr (std::is_same<void, RequestType>::value) {
+      future = (*(this->method))();
+    } else if constexpr (sizeof...(Args) == 1) {
+      future = (*(this->method))(*request.get());
+    } else {
+      future = std::apply(*(this->method), *request.get());
+    }
     dear::TimeContext::invalidate_timestamp();
 
     // make sure we keep the future alive until the callback is issued
@@ -102,8 +133,16 @@ class BaseProxyMethodTransactor : public reactor::Reactor {
     }
   }
 
- protected:
-  virtual void on_send_response() = 0;
+  void on_send_response() {
+    if constexpr (std::is_same<void, R>::value) {
+      this->response.set();
+    } else {
+      auto future_ptr = this->send_response.get();
+      auto result = future_ptr->GetResult();
+      assert(result.HasValue());
+      this->response.set(result.Value());
+    }
+  }
 
  public:
   // reactor ports
@@ -111,11 +150,11 @@ class BaseProxyMethodTransactor : public reactor::Reactor {
   reactor::Output<R> response{"response", this};
   reactor::Input<Method*> update_binding{"update_binding", this};
 
-  BaseProxyMethodTransactor(const std::string& name,
-                            reactor::Environment* env,
-                            reactor::Duration request_deadline,
-                            reactor::Duration max_network_delay,
-                            reactor::Duration max_synchronization_error)
+  ProxyMethodTransactor(const std::string& name,
+                        reactor::Environment* env,
+                        reactor::Duration request_deadline,
+                        reactor::Duration max_network_delay,
+                        reactor::Duration max_synchronization_error)
       : reactor::Reactor(name, env)
       , request_deadline(request_deadline)
       , max_network_delay(max_network_delay)
@@ -123,11 +162,11 @@ class BaseProxyMethodTransactor : public reactor::Reactor {
       , logger(apd::CreateLogger(name.c_str(),
                                  name.c_str(),
                                  ara::log::LogLevel::kDebug)) {}
-  BaseProxyMethodTransactor(const std::string& name,
-                            reactor::Reactor* container,
-                            reactor::Duration request_deadline,
-                            reactor::Duration max_network_delay,
-                            reactor::Duration max_synchronization_error)
+  ProxyMethodTransactor(const std::string& name,
+                        reactor::Reactor* container,
+                        reactor::Duration request_deadline,
+                        reactor::Duration max_network_delay,
+                        reactor::Duration max_synchronization_error)
       : reactor::Reactor(name, container)
       , request_deadline(request_deadline)
       , max_network_delay(max_network_delay)
@@ -146,76 +185,6 @@ class BaseProxyMethodTransactor : public reactor::Reactor {
     r_send_response.declare_trigger(&send_response);
     r_send_response.declare_antidependency(&response);
   }
-};
-
-template <class Method>
-class ProxyMethodTransactor;
-
-template <class R, class... Args>
-class ProxyMethodTransactor<apd::proxy::Method<R(Args...)>>
-    : public BaseProxyMethodTransactor<R, Args...> {
- private:
-  using Base = BaseProxyMethodTransactor<R, Args...>;
-
- public:
-  ProxyMethodTransactor(const std::string& name,
-                        reactor::Environment* env,
-                        reactor::Duration request_deadline,
-                        reactor::Duration max_network_delay,
-                        reactor::Duration max_synchronization_error)
-      : Base(name,
-             env,
-             request_deadline,
-             max_network_delay,
-             max_synchronization_error) {}
-  ProxyMethodTransactor(const std::string& name,
-                        reactor::Reactor* container,
-                        reactor::Duration request_deadline,
-                        reactor::Duration max_network_delay,
-                        reactor::Duration max_synchronization_error)
-      : Base(name,
-             container,
-             request_deadline,
-             max_network_delay,
-             max_synchronization_error) {}
-
-  void on_send_response() override {
-    auto future_ptr = this->send_response.get();
-    auto result = future_ptr->GetResult();
-    assert(result.HasValue());
-    this->response.set(result.Value());
-  }
-};
-
-template <class... Args>
-class ProxyMethodTransactor<apd::proxy::Method<void(Args...)>>
-    : public BaseProxyMethodTransactor<void, Args...> {
- private:
-  using Base = BaseProxyMethodTransactor<void, Args...>;
-
- public:
-  ProxyMethodTransactor(const std::string& name,
-                        reactor::Environment* env,
-                        reactor::Duration request_deadline,
-                        reactor::Duration max_network_delay,
-                        reactor::Duration max_synchronization_error)
-      : Base(name,
-             env,
-             request_deadline,
-             max_network_delay,
-             max_synchronization_error) {}
-  ProxyMethodTransactor(const std::string& name,
-                        reactor::Reactor* container,
-                        reactor::Duration request_deadline,
-                        reactor::Duration max_network_delay,
-                        reactor::Duration max_synchronization_error)
-      : Base(name,
-             container,
-             request_deadline,
-             max_network_delay,
-             max_synchronization_error) {}
-
-  void on_send_response() override { this->response.set(); }
 };
 
 }  // namespace dear

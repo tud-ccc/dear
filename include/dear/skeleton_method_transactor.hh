@@ -15,8 +15,12 @@ namespace dear {
 #include "dear/apd_dependencies.hh"
 #include "dear/time_context.hh"
 
-template <class R, class... Args>
-class BaseSkeletonMethodTransactor : public reactor::Reactor {
+template <class Func>
+class SkeletonMethodTransactor;
+
+template <class Service, class R, class... Args>
+class SkeletonMethodTransactor<apd::Future<R> (Service::*)(Args...)>
+    : public reactor::Reactor {
  public:
   using RequestType = std::tuple<typename std::remove_cv<
       typename std::remove_reference<Args>::type>::type...>;
@@ -76,18 +80,28 @@ class BaseSkeletonMethodTransactor : public reactor::Reactor {
 
   void on_send_request() { request.set(send_request.get()); }
 
-  virtual void on_response() = 0;
+  void on_response() {
+    dear::TimeContext::provide_timestamp(this->get_logical_time() +
+                                         this->response_deadline);
+    if constexpr (std::is_same<void, R>::value) {
+      this->pending_requests.begin()->second.set_value();
+    } else {
+      this->pending_requests.begin()->second.set_value(*this->response.get());
+    }
+    dear::TimeContext::invalidate_timestamp();
+    this->pending_requests.erase(this->pending_requests.begin());
+  }
 
  public:
   // reactor ports
   reactor::Output<RequestType> request{"request", this};
   reactor::Input<R> response{"response", this};
 
-  BaseSkeletonMethodTransactor(const std::string& name,
-                               reactor::Environment* env,
-                               reactor::Duration response_deadline,
-                               reactor::Duration max_network_delay,
-                               reactor::Duration max_synchronization_error)
+  SkeletonMethodTransactor(const std::string& name,
+                           reactor::Environment* env,
+                           reactor::Duration response_deadline,
+                           reactor::Duration max_network_delay,
+                           reactor::Duration max_synchronization_error)
       : reactor::Reactor(name, env)
       , response_deadline(response_deadline)
       , max_network_delay(max_network_delay)
@@ -96,11 +110,11 @@ class BaseSkeletonMethodTransactor : public reactor::Reactor {
                                  name.c_str(),
                                  ara::log::LogLevel::kDebug)) {}
 
-  BaseSkeletonMethodTransactor(const std::string& name,
-                               reactor::Reactor* container,
-                               reactor::Duration response_deadline,
-                               reactor::Duration max_network_delay,
-                               reactor::Duration max_synchronization_error)
+  SkeletonMethodTransactor(const std::string& name,
+                           reactor::Reactor* container,
+                           reactor::Duration response_deadline,
+                           reactor::Duration max_network_delay,
+                           reactor::Duration max_synchronization_error)
       : reactor::Reactor(name, container)
       , response_deadline(response_deadline)
       , max_network_delay(max_network_delay)
@@ -131,84 +145,4 @@ class BaseSkeletonMethodTransactor : public reactor::Reactor {
     return future;
   }
 };
-
-template <class Func>
-class SkeletonMethodTransactor;
-
-template <class Service, class R, class... Args>
-class SkeletonMethodTransactor<apd::Future<R> (Service::*)(Args...)>
-    : public BaseSkeletonMethodTransactor<R, Args...> {
- private:
-  using Base = BaseSkeletonMethodTransactor<R, Args...>;
-
- public:
-  SkeletonMethodTransactor(const std::string& name,
-                           reactor::Environment* env,
-                           reactor::Duration response_deadline,
-                           reactor::Duration max_network_delay,
-                           reactor::Duration max_synchronization_error)
-      : Base(name,
-             env,
-             response_deadline,
-             max_network_delay,
-             max_synchronization_error) {}
-
-  SkeletonMethodTransactor(const std::string& name,
-                           reactor::Reactor* container,
-                           reactor::Duration response_deadline,
-                           reactor::Duration max_network_delay,
-                           reactor::Duration max_synchronization_error)
-      : Base(name,
-             container,
-             response_deadline,
-             max_network_delay,
-             max_synchronization_error) {}
-
-  void on_response() override {
-    dear::TimeContext::provide_timestamp(this->get_logical_time() +
-                                         this->response_deadline);
-    this->pending_requests.begin()->second.set_value(*this->response.get());
-    dear::TimeContext::invalidate_timestamp();
-    this->pending_requests.erase(this->pending_requests.begin());
-  }
-};
-
-template <class Service, class... Args>
-class SkeletonMethodTransactor<apd::Future<void> (Service::*)(Args...)>
-    : public BaseSkeletonMethodTransactor<void, Args...> {
- private:
-  using Base = BaseSkeletonMethodTransactor<void, Args...>;
-
- public:
-  SkeletonMethodTransactor(const std::string& name,
-                           reactor::Environment* env,
-                           reactor::Duration response_deadline,
-                           reactor::Duration max_network_delay,
-                           reactor::Duration max_synchronization_error)
-      : Base(name,
-             env,
-             response_deadline,
-             max_network_delay,
-             max_synchronization_error) {}
-
-  SkeletonMethodTransactor(const std::string& name,
-                           reactor::Reactor* container,
-                           reactor::Duration response_deadline,
-                           reactor::Duration max_network_delay,
-                           reactor::Duration max_synchronization_error)
-      : Base(name,
-             container,
-             response_deadline,
-             max_network_delay,
-             max_synchronization_error) {}
-
-  void on_response() override {
-    dear::TimeContext::provide_timestamp(this->get_logical_time() +
-                                         this->response_deadline);
-    this->pending_requests.begin()->second.set_value();
-    dear::TimeContext::invalidate_timestamp();
-    this->pending_requests.erase(this->pending_requests.begin());
-  }
-};
-
 }  // namespace dear
