@@ -63,7 +63,8 @@ apd::Result<reactor::TimePoint, bool> get_timestamp_from_message(
   // check if there is a timestamp attached
   if (payload_size == sizeof(reactor::Duration::rep) + message_size) {
     apd::Unmarshaller<Args..., reactor::Duration::rep> unmarshaller(*message);
-    reactor::Duration::rep time_ns = unmarshaller.template unmarshal<sizeof...(Args)>();
+    reactor::Duration::rep time_ns =
+        unmarshaller.template unmarshal<sizeof...(Args)>();
     reactor::TimePoint timestamp{reactor::Duration{time_ns}};
     return Result::FromValue(timestamp);
   }
