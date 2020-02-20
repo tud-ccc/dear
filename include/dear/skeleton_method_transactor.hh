@@ -14,6 +14,30 @@ namespace dear {
 
 #include "dear/apd_dependencies.hh"
 #include "dear/time_context.hh"
+#include "dear/type_traits.hh"
+
+template <class R, class T>
+struct RequestDataStruct {
+  apd::Promise<R> promise;
+  reactor::ImmutableValuePtr<T> args;
+  reactor::TimePoint timestamp;
+
+  RequestDataStruct(apd::Promise<R>&& promise,
+                    reactor::ImmutableValuePtr<T>&& args,
+                    reactor::TimePoint timestamp)
+      : promise(std::forward<apd::Promise<R>>(promise))
+      , args(std::forward<reactor::ImmutableValuePtr<T>>(args))
+      , timestamp(timestamp) {}
+};
+
+template <class R>
+struct RequestDataStruct<R, void> {
+  apd::Promise<R> promise;
+  reactor::TimePoint timestamp;
+
+  RequestDataStruct(apd::Promise<R>&& promise, reactor::TimePoint timestamp)
+      : promise(std::forward<apd::Promise<R>>(promise)), timestamp(timestamp) {}
+};
 
 template <class Func>
 class SkeletonMethodTransactor;
@@ -22,22 +46,8 @@ template <class Service, class R, class... Args>
 class SkeletonMethodTransactor<apd::Future<R> (Service::*)(Args...)>
     : public reactor::Reactor {
  public:
-  using RequestType = std::tuple<typename std::remove_cv<
-      typename std::remove_reference<Args>::type>::type...>;
-  using RequestValue = reactor::ImmutableValuePtr<RequestType>;
-
-  struct RequestData {
-    apd::Promise<R> promise;
-    RequestValue args;
-    reactor::TimePoint timestamp;
-
-    RequestData(apd::Promise<R>&& promise,
-                RequestValue&& args,
-                reactor::TimePoint timestamp)
-        : promise(std::forward<apd::Promise<R>>(promise))
-        , args(std::forward<RequestValue>(args))
-        , timestamp(timestamp) {}
-  };
+  using RequestType = typename get_request_type<Args...>::type;
+  using RequestData = RequestDataStruct<R, RequestType>;
 
  protected:
   // reactor state
@@ -71,14 +81,24 @@ class SkeletonMethodTransactor<apd::Future<R> (Service::*)(Args...)>
     assert(result.second);
 
     if (t > lt) {
-      send_request.schedule(std::move(request->args), t - lt);
+      if constexpr (std::is_same<void, RequestType>::value) {
+        send_request.schedule(t - lt);
+      } else {
+        send_request.schedule(std::move(request->args), t - lt);
+      }
     } else {
       logger.LogError() << "Timing violation! Received a message with "
                            "timestamp in the past!";
     }
   }
 
-  void on_send_request() { request.set(send_request.get()); }
+  void on_send_request() {
+    if constexpr (std::is_same<void, RequestType>::value) {
+      request.set();
+    } else {
+      request.set(send_request.get());
+    }
+  }
 
   void on_response() {
     dear::TimeContext::provide_timestamp(this->get_logical_time() +
@@ -135,13 +155,20 @@ class SkeletonMethodTransactor<apd::Future<R> (Service::*)(Args...)>
   apd::Future<R> process_request(Args&&... args) {
     apd::Promise<R> promise;
     auto future = promise.get_future();
-    auto request =
-        reactor::make_immutable_value<RequestType>(std::forward<Args>(args)...);
+
     auto timestamp = TimeContext::retrieve_timestamp();
     assert(timestamp.HasValue());
-    auto value = reactor::make_immutable_value<RequestData>(
-        std::move(promise), std::move(request), timestamp.Value());
-    receive_request.schedule(std::move(value));
+    if constexpr (std::is_same<void, RequestType>::value) {
+      auto value = reactor::make_immutable_value<RequestData>(
+          std::move(promise), timestamp.Value());
+      receive_request.schedule(std::move(value));
+    } else {
+      auto request = reactor::make_immutable_value<RequestType>(
+          std::forward<Args>(args)...);
+      auto value = reactor::make_immutable_value<RequestData>(
+          std::move(promise), std::move(request), timestamp.Value());
+      receive_request.schedule(std::move(value));
+    }
     return future;
   }
 };
