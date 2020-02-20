@@ -16,41 +16,36 @@
 namespace dear {
 
 template <class T>
-class ProxyEventTransactor : public reactor::Reactor {
+class ProxyEventTransactor;
+
+template <class T>
+class ProxyEventTransactor<apd::proxy::Event<T>&> : public reactor::Reactor {
  private:
   using Event = apd::proxy::Event<T>;
 
-  Event* event;
+  // state
+  Event* event{nullptr};
+  apd::Logger& logger;
+  const reactor::Duration max_network_delay;
+  const reactor::Duration max_synchronization_error;
 
+  // actions
   reactor::PhysicalAction<void> trigger{"trigger", this};
   reactor::LogicalAction<T> send{"send", this};
 
-  reactor::Reaction r_trigger{"r_trigger", 1, this, [this]() { on_trigger(); }};
-  reactor::Reaction r_send{"r_send", 2, this, [this]() { on_send(); }};
+  // reactions
+  reactor::Reaction r_update_binding{"r_update_binding", 1, this,
+                                     [this]() { on_update_binding(); }};
+  reactor::Reaction r_trigger{"r_trigger", 2, this, [this]() { on_trigger(); }};
+  reactor::Reaction r_send{"r_send", 3, this, [this]() { on_send(); }};
 
-  reactor::Duration max_network_delay;
-  reactor::Duration max_synchronization_error;
-  apd::Logger& logger;
-
- public:
-  reactor::Output<T> notify{"notify", this};
-
-  ProxyEventTransactor(const std::string& name,
-                       reactor::Environment* env,
-                       Event* event,
-                       reactor::Duration max_network_delay,
-                       reactor::Duration max_synchronization_error)
-      : reactor::Reactor(name, env)
-      , event(event)
-      , max_network_delay(max_network_delay)
-      , max_synchronization_error(max_synchronization_error)
-      , logger(apd::CreateLogger(name.c_str(),
-                                 name.c_str(),
-                                 ara::log::LogLevel::kDebug)) {
-    assert(event != nullptr);
-    assert(env != nullptr);
-    event->Subscribe(ara::com::EventCacheUpdatePolicy::kNewestN, 100);
-    event->SetReceiveHandler([this]() { trigger.schedule(); });
+  // reaction bodies
+  void on_update_binding() {
+    this->event = *update_binding.get();
+    if (this->event != nullptr) {
+      event->Subscribe(ara::com::EventCacheUpdatePolicy::kNewestN, 100);
+      event->SetReceiveHandler([this]() { trigger.schedule(); });
+    }
   }
 
   void on_trigger() {
@@ -76,23 +71,40 @@ class ProxyEventTransactor : public reactor::Reactor {
 
   void on_send() { notify.set(send.get()); }
 
+ public:
+  // potrs
+  reactor::Output<T> notify{"notify", this};
+  reactor::Input<Event*> update_binding{"update_binding", this};
+
+  ProxyEventTransactor(const std::string& name,
+                       reactor::Environment* env,
+                       reactor::Duration max_network_delay,
+                       reactor::Duration max_synchronization_error)
+      : reactor::Reactor(name, env)
+      , max_network_delay(max_network_delay)
+      , max_synchronization_error(max_synchronization_error)
+      , logger(apd::CreateLogger(name.c_str(),
+                                 name.c_str(),
+                                 ara::log::LogLevel::kDebug)) {}
+
+  ProxyEventTransactor(const std::string& name,
+                       reactor::Reactor* container,
+                       reactor::Duration max_network_delay,
+                       reactor::Duration max_synchronization_error)
+      : reactor::Reactor(name, container)
+      , max_network_delay(max_network_delay)
+      , max_synchronization_error(max_synchronization_error)
+      , logger(apd::CreateLogger(name.c_str(),
+                                 name.c_str(),
+                                 ara::log::LogLevel::kDebug)) {}
+
   void assemble() override {
+    r_update_binding.declare_trigger(&update_binding);
     r_trigger.declare_trigger(&trigger);
     r_trigger.declare_scheduable_action(&send);
     r_send.declare_trigger(&send);
     r_send.declare_antidependency(&notify);
   }
 };
-
-template <class T>
-std::unique_ptr<ProxyEventTransactor<T>> create_proxy_event_transactor(
-    const std::string& name,
-    reactor::Environment* env,
-    apd::proxy::Event<T>* event,
-    reactor::Duration max_network_delay,
-    reactor::Duration max_synchronization_error) {
-  return std::make_unique<ProxyEventTransactor<T>>(
-      name, env, event, max_network_delay, max_synchronization_error);
-}
 
 }  // namespace dear
