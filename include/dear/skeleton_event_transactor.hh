@@ -16,19 +16,32 @@
 namespace dear {
 
 template <class T>
-class SkeletonEventTransactor : public reactor::Reactor {
+class SkeletonEventTransactor;
+
+template <class T>
+class SkeletonEventTransactor<apd::skeleton::EventDispatcher<T>>
+    : public reactor::Reactor {
  private:
   using Event = apd::skeleton::EventDispatcher<T>;
 
+  // state
   Event* event;
-
-  reactor::Reaction r_notify{"r_notify", 1, this, [this]() { on_notify(); }};
-
-  reactor::Duration deadline;
-
+  const reactor::Duration deadline;
   apd::Logger& logger;
 
+  // reactions
+  reactor::Reaction r_notify{"r_notify", 1, this, [this]() { on_notify(); }};
+
+  // reaction bodies
+  void on_notify() {
+    auto x = notify.get();
+    TimeContext::provide_timestamp(this->get_logical_time() + deadline);
+    event->Send(*x);
+    TimeContext::invalidate_timestamp();
+  }
+
  public:
+  // ports
   reactor::Input<T> notify{"notify", this};
 
   SkeletonEventTransactor(const std::string& name,
@@ -40,33 +53,24 @@ class SkeletonEventTransactor : public reactor::Reactor {
       , deadline(deadline)
       , logger(apd::CreateLogger(name.c_str(),
                                  name.c_str(),
-                                 ara::log::LogLevel::kDebug)) {
-    assert(env != nullptr);
-    assert(event != nullptr);
-  }
+                                 ara::log::LogLevel::kDebug)) {}
+
+  SkeletonEventTransactor(const std::string& name,
+                          reactor::Reactor* container,
+                          Event* event,
+                          reactor::Duration deadline)
+      : reactor::Reactor(name, container)
+      , event(event)
+      , deadline(deadline)
+      , logger(apd::CreateLogger(name.c_str(),
+                                 name.c_str(),
+                                 ara::log::LogLevel::kDebug)) {}
 
   void assemble() override {
     r_notify.declare_trigger(&notify);
     r_notify.set_deadline(
         deadline, [this]() { logger.LogError() << "Missed the deadline!"; });
   }
-
-  void on_notify() {
-    auto x = notify.get();
-    TimeContext::provide_timestamp(this->get_logical_time() + deadline);
-    event->Send(*x);
-    TimeContext::invalidate_timestamp();
-  }
-};  // namespace dear
-
-template <class T>
-std::unique_ptr<SkeletonEventTransactor<T>> create_skeleton_event_transactor(
-    const std::string& name,
-    reactor::Environment* env,
-    apd::skeleton::EventDispatcher<T>* event,
-    reactor::Duration deadline) {
-  return std::make_unique<SkeletonEventTransactor<T>>(name, env, event,
-                                                      deadline);
-}
+};
 
 }  // namespace dear
