@@ -44,5 +44,5 @@ cmake -DCMAKE_INSTALL_PREFIX=<install-dir> -Dreactor-cpp_DIR=<install_dir>/share
 ## Publications
 
 - [1] [Reactors: A Deterministic Model for
-Composable Reactive Systems](https://people.eecs.berkeley.edu/~marten/pdf/Lohstroh_etAl_CyPhy19.pdf) (Spy '19)
+Composable Reactive Systems](https://people.eecs.berkeley.edu/~marten/pdf/Lohstroh_etAl_CyPhy19.pdf) (CyPhy'19)
 - [2] [Achieving Determinism in Adaptive AUTOSAR](https://arxiv.org/pdf/1912.01367) (DATE'20)
